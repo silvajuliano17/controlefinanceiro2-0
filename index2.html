@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Controle Financeiro</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 10px;
+            background: #f8f9fa;
+        }
+        h1 {
+            text-align: center;
+            font-size: 1.8rem;
+        }
+        .form-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+        .form-container label {
+            font-size: 0.9rem;
+            margin-right: 4px;
+        }
+        .form-container input, .form-container button {
+            padding: 6px;
+            font-size: 0.9rem;
+        }
+        .btn {
+            padding: 6px 12px;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+            color: white;
+            transition: 0.2s;
+        }
+        .btn-add { background: #28a745; }
+        .btn-del { background: #dc3545; }
+        .btn:hover { opacity: 0.8; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            background: white;
+            border-radius: 5px;
+            overflow: hidden;
+            font-size: 0.9rem;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 6px;
+            text-align: center;
+        }
+        th {
+            background: #007bff;
+            color: white;
+        }
+
+        .container {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        canvas {
+            background: white;
+            border-radius: 10px;
+            padding: 10px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+            height: auto;
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 1.5rem; }
+            .form-container { flex-direction: column; align-items: stretch; }
+            .form-container input, .form-container button { width: 100%; }
+        }
+
+        @media (max-width: 480px) {
+            table { font-size: 0.8rem; }
+            th, td { padding: 4px; }
+        }
+    </style>
+</head>
+<body>
+
+<h1>💰 Controle Financeiro</h1>
+
+<div class="form-container">
+    <label>Descrição:</label>
+    <input type="text" id="descricao" placeholder="Ex: Salário, Aluguel">
+    <label>Valor:</label>
+    <input type="number" id="valor" step="0.01">
+    <label>Data:</label>
+    <input type="month" id="mes">
+    <label>Parcelas:</label>
+    <input type="number" id="parcelas" min="1" value="1">
+    <button class="btn btn-add" onclick="adicionarGasto()">Adicionar Despesa</button>
+    <button class="btn btn-add" onclick="adicionarReceita()">Adicionar Receita</button>
+</div>
+
+<table id="tabela">
+    <thead>
+        <tr>
+            <th>Descrição</th>
+            <th>Valor</th>
+            <th>Mês</th>
+            <th>Pago</th>
+            <th>Ações</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<div class="container">
+    <canvas id="graficoBarra"></canvas>
+</div>
+
+<script>
+let gastos = [];
+let receitaTotal = 0;
+let despesaTotal = 0;
+let graficoBarra;
+
+function salvarDados() {
+    localStorage.setItem('gastos', JSON.stringify(gastos));
+    localStorage.setItem('receitaTotal', receitaTotal);
+    localStorage.setItem('despesaTotal', despesaTotal);
+}
+
+function carregarDados() {
+    const dadosGastos = localStorage.getItem('gastos');
+    if (dadosGastos) gastos = JSON.parse(dadosGastos);
+    receitaTotal = parseFloat(localStorage.getItem('receitaTotal')) || 0;
+    despesaTotal = parseFloat(localStorage.getItem('despesaTotal')) || 0;
+}
+
+function adicionarGasto() {
+    const desc = document.getElementById('descricao').value;
+    const valor = parseFloat(document.getElementById('valor').value);
+    const mes = document.getElementById('mes').value;
+    const parcelas = parseInt(document.getElementById('parcelas').value);
+
+    if (!desc || !valor || !mes) return alert('Preencha todos os campos!');
+
+    let valorParcela = parseFloat((valor / parcelas).toFixed(2));
+    let [ano, mesInicial] = mes.split('-').map(Number);
+
+    for (let i = 0; i < parcelas; i++) {
+        let mesAtual = mesInicial + i;
+        let anoAtual = ano;
+        if (mesAtual > 12) {
+            anoAtual += Math.floor((mesAtual - 1) / 12);
+            mesAtual = ((mesAtual - 1) % 12) + 1;
+        }
+        gastos.push({
+            descricao: `${desc} (Parcela ${i + 1}/${parcelas})`,
+            valor: valorParcela,
+            mes: `${anoAtual}-${String(mesAtual).padStart(2, '0')}`,
+            pago: false,
+            tipo: 'despesa'
+        });
+    }
+
+    despesaTotal += valor;
+    salvarDados();
+    atualizarTabela();
+    atualizarGrafico();
+}
+
+function adicionarReceita() {
+    const desc = document.getElementById('descricao').value;
+    const valor = parseFloat(document.getElementById('valor').value);
+    const mes = document.getElementById('mes').value;
+
+    if (!desc || !valor || !mes) return alert('Preencha todos os campos!');
+
+    gastos.push({ descricao: desc, valor, mes, pago: true, tipo: 'receita' });
+    receitaTotal += valor;
+    salvarDados();
+    atualizarTabela();
+    atualizarGrafico();
+}
+
+function excluirGasto(index) {
+    let item = gastos[index];
+    if (item.tipo === 'despesa') despesaTotal -= item.valor;
+    else receitaTotal -= item.valor;
+    gastos.splice(index, 1);
+    salvarDados();
+    atualizarTabela();
+    atualizarGrafico();
+}
+
+function marcarPago(index) {
+    gastos[index].pago = !gastos[index].pago;
+    salvarDados();
+    atualizarTabela();
+    atualizarGrafico();
+}
+
+function atualizarTabela() {
+    const tbody = document.querySelector('#tabela tbody');
+    tbody.innerHTML = '';
+    gastos.forEach((g, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${g.descricao}</td>
+            <td>R$ ${g.valor.toFixed(2)}</td>
+            <td>${g.mes}</td>
+            <td><input type="checkbox" ${g.pago ? 'checked' : ''} onclick="marcarPago(${i})"></td>
+            <td><button class="btn btn-del" onclick="excluirGasto(${i})">Excluir</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function atualizarGrafico() {
+    let receita = gastos.filter(g => g.tipo === 'receita' && g.pago).reduce((sum, g) => sum + g.valor, 0);
+    let despesa = gastos.filter(g => g.tipo === 'despesa' && g.pago).reduce((sum, g) => sum + g.valor, 0);
+    let saldo = receita - despesa;
+
+    if (graficoBarra) graficoBarra.destroy();
+
+    graficoBarra = new Chart(document.getElementById('graficoBarra'), {
+        type: 'bar',
+        data: {
+            labels: ['Orçamento'],
+            datasets: [
+                {
+                    label: 'Despesas',
+                    data: [despesa],
+                    backgroundColor: '#dc3545'
+                },
+                {
+                    label: 'Saldo',
+                    data: [saldo > 0 ? saldo : 0],
+                    backgroundColor: '#28a745'
+                }
+            ]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    stacked: true,
+                    max: receita > 0 ? receita : 100,
+                    ticks: {
+                        callback: v => "R$ " + v
+                    }
+                },
+                y: { stacked: true }
+            },
+            plugins: {
+                legend: { position: 'bottom' },
+                datalabels: {
+                    anchor: 'center',
+                    align: 'center',
+                    color: 'white',
+                    font: { weight: 'bold' },
+                    formatter: (value, ctx) => {
+                        if (ctx.dataset.label === 'Despesas') {
+                            return `-R$ ${value.toFixed(2)}`;
+                        } else if (ctx.dataset.label === 'Saldo') {
+                            return `R$ ${value.toFixed(2)}`;
+                        }
+                        return value;
+                    }
+                }
+            }
+        },
+        plugins: [ChartDataLabels]
+    });
+}
+
+carregarDados();
+atualizarTabela();
+atualizarGrafico();
+</script>
+
+</body>
+</html>
